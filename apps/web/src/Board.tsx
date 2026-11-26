@@ -1,22 +1,27 @@
 import { useEffect, useRef } from "react";
 import type { Cell, GameState, Ruleset } from "@tracerun/engine";
 
+// Forensic Arcade palette. Lime is reserved for the player and the goal;
+// teal means "being verified"; deaths stay neutral (losing is not an error).
 const C = {
-  bg: "#0b0b0c",
-  grid: "rgba(237, 232, 220, 0.045)",
-  bone: "#ede8dc",
-  dim: "#77736b",
-  signal: "#ff5a1f",
-  hazard: "#26262a",
-  hazardEdge: "rgba(237, 232, 220, 0.16)",
-  dead: "#e5484d",
+  bg: "#090d0c",
+  grid: "rgba(232, 238, 233, 0.05)",
+  gridMajor: "rgba(232, 238, 233, 0.09)",
+  text: "#e8eee9",
+  muted: "#89978d",
+  lime: "#d6ff5f",
+  teal: "#55d9c2",
+  hazard: "#151d19",
+  hazardEdge: "rgba(137, 151, 141, 0.45)",
 };
 
 interface Props {
   state: GameState;
   rules: Ruleset;
-  /** Draw the snake in "replay" tone. */
+  /** Draw the snake in "replay" (verification) tone. */
   ghost?: boolean;
+  /** Disable pulsing animation. */
+  still?: boolean;
 }
 
 /**
@@ -24,12 +29,14 @@ interface Props {
  * animation loop, so pulses animate smoothly between game ticks.
  * Rendering never touches game logic.
  */
-export function Board({ state, rules, ghost = false }: Props): JSX.Element {
+export function Board({ state, rules, ghost = false, still = false }: Props): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
   const ghostRef = useRef(ghost);
   ghostRef.current = ghost;
+  const stillRef = useRef(still);
+  stillRef.current = still;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -48,23 +55,26 @@ export function Board({ state, rules, ghost = false }: Props): JSX.Element {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const cell = size / rules.width;
       const s = stateRef.current;
-      const pulse = 0.5 + 0.5 * Math.sin(t / 260);
+      const pulse = stillRef.current ? 0.6 : 0.5 + 0.5 * Math.sin(t / 260);
 
       ctx.fillStyle = C.bg;
       ctx.fillRect(0, 0, size, size);
 
-      // Hairline grid.
-      ctx.strokeStyle = C.grid;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let i = 1; i < rules.width; i++) {
-        const p = Math.round(i * cell) + 0.5;
-        ctx.moveTo(p, 0);
-        ctx.lineTo(p, size);
-        ctx.moveTo(0, p);
-        ctx.lineTo(size, p);
+      // Hairline grid, with a slightly stronger line every 6 cells.
+      for (const major of [false, true]) {
+        ctx.strokeStyle = major ? C.gridMajor : C.grid;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let i = 1; i < rules.width; i++) {
+          if ((i % 6 === 0) !== major) continue;
+          const p = Math.round(i * cell) + 0.5;
+          ctx.moveTo(p, 0);
+          ctx.lineTo(p, size);
+          ctx.moveTo(0, p);
+          ctx.lineTo(size, p);
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
 
       const rect = (c: Cell, inset: number) =>
         [c.x * cell + inset, c.y * cell + inset, cell - inset * 2, cell - inset * 2] as const;
@@ -88,29 +98,30 @@ export function Board({ state, rules, ghost = false }: Props): JSX.Element {
         ctx.restore();
       }
 
-      // Data packet.
+      // Data packet: a bright square inside a thin bracket.
       if (s.food) {
-        const [x, y, w] = rect(s.food, cell * 0.22);
-        ctx.fillStyle = C.signal;
-        ctx.shadowColor = C.signal;
-        ctx.shadowBlur = 8 + 8 * pulse;
+        const [x, y, w] = rect(s.food, cell * 0.28);
+        ctx.fillStyle = C.text;
         ctx.fillRect(x, y, w, w);
-        ctx.shadowBlur = 0;
+        const [bx, by, bw] = rect(s.food, cell * 0.1);
+        ctx.strokeStyle = `rgba(232, 238, 233, ${0.25 + 0.45 * pulse})`;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bw - 1);
       }
 
       // Extraction gate.
       if (s.exit) {
         const cx = (s.exit.x + 0.5) * cell;
         const cy = (s.exit.y + 0.5) * cell;
-        ctx.strokeStyle = C.signal;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = C.lime;
+        ctx.lineWidth = 1.5;
         for (let r = 0; r < 3; r++) {
           const rr = ((pulse + r / 3) % 1) * cell * 1.4 + cell * 0.2;
           ctx.globalAlpha = 1 - ((pulse + r / 3) % 1);
           ctx.strokeRect(cx - rr / 2, cy - rr / 2, rr, rr);
         }
         ctx.globalAlpha = 1;
-        ctx.fillStyle = C.bone;
+        ctx.fillStyle = C.lime;
         const [x, y, w] = rect(s.exit, cell * 0.3);
         ctx.fillRect(x, y, w, w);
       }
@@ -122,17 +133,28 @@ export function Board({ state, rules, ghost = false }: Props): JSX.Element {
         const head = i === 0;
         const fade = n > 1 ? 1 - (i / (n - 1)) * 0.6 : 1;
         const [x, y, w, h] = rect(seg, head ? 1 : 2.5);
+        const dead = s.status === "dead";
         if (head) {
-          ctx.fillStyle = s.status === "dead" ? C.dead : ghostRef.current ? C.signal : C.bone;
-          ctx.shadowColor = ctx.fillStyle;
-          ctx.shadowBlur = 10;
+          ctx.fillStyle = dead ? C.muted : ghostRef.current ? C.teal : C.lime;
         } else {
           ctx.fillStyle = ghostRef.current
-            ? `rgba(255, 90, 31, ${0.25 + 0.5 * fade})`
-            : `rgba(237, 232, 220, ${0.22 + 0.6 * fade})`;
+            ? `rgba(85, 217, 194, ${0.2 + 0.55 * fade})`
+            : dead
+              ? `rgba(137, 151, 141, ${0.18 + 0.4 * fade})`
+              : `rgba(232, 238, 233, ${0.2 + 0.62 * fade})`;
         }
         ctx.fillRect(x, y, w, h);
-        ctx.shadowBlur = 0;
+        if (head && dead) {
+          // Neutral "x" on the head where the run ended.
+          ctx.strokeStyle = C.bg;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x + w * 0.25, y + h * 0.25);
+          ctx.lineTo(x + w * 0.75, y + h * 0.75);
+          ctx.moveTo(x + w * 0.75, y + h * 0.25);
+          ctx.lineTo(x + w * 0.25, y + h * 0.75);
+          ctx.stroke();
+        }
       }
 
       raf = requestAnimationFrame(draw);

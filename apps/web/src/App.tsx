@@ -14,6 +14,8 @@ import {
   type RunResult,
 } from "@tracerun/engine";
 import { Board } from "./Board";
+import { Receipt } from "./Receipt";
+import "./fonts";
 import "./styles.css";
 
 type Mode = "idle" | "playing" | "ended" | "replaying";
@@ -24,6 +26,7 @@ const KEYS: Record<string, Dir> = {
 };
 
 const ARROW: Record<Dir, string> = { U: "↑", D: "↓", L: "←", R: "→" };
+const DIR_NAME: Record<Dir, string> = { U: "Up", D: "Down", L: "Left", R: "Right" };
 
 /**
  * Today's shared challenge. For now the seed is derived client-side from the
@@ -35,7 +38,6 @@ function dailyChallenge(): Challenge {
 }
 
 const pad = (n: number, w = 4) => String(n).padStart(w, "0");
-const short = (h: string) => `${h.slice(0, 10)}…${h.slice(-6)}`;
 
 function loadBest(id: string): number | null {
   try {
@@ -53,9 +55,23 @@ function saveBest(id: string, ticks: number): void {
   }
 }
 
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const on = () => setReduced(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return reduced;
+}
+
 export function App(): JSX.Element {
   const challenge = useMemo(dailyChallenge, []);
   const chainId = import.meta.env.VITE_QORE_CHAIN_ID ?? "qorechain-diana";
+  const reducedMotion = usePrefersReducedMotion();
 
   const runRef = useRef<LiveRun | null>(null);
   const [mode, setMode] = useState<Mode>("idle");
@@ -65,6 +81,7 @@ export function App(): JSX.Element {
   const [reproduced, setReproduced] = useState<boolean | null>(null);
   const [replayCheck, setReplayCheck] = useState<boolean | null>(null);
   const [best, setBest] = useState<number | null>(() => loadBest(challenge.id));
+  const [announce, setAnnounce] = useState("");
 
   const start = useCallback(() => {
     runRef.current = new LiveRun(challenge);
@@ -73,12 +90,14 @@ export function App(): JSX.Element {
     setResult(null);
     setReproduced(null);
     setReplayCheck(null);
+    setAnnounce("Run started.");
     setMode("playing");
   }, [challenge]);
 
   const finish = useCallback(
     (run: LiveRun) => {
-      // Verify our own run the same way the server will: replay from scratch.
+      // Check our own run the same way the server will: replay from scratch.
+      // This is a LOCAL check only. It is never shown as VERIFIED.
       const out = replay(challenge, run.inputs);
       if (out.ok) {
         setResult(out.result);
@@ -87,6 +106,11 @@ export function App(): JSX.Element {
           saveBest(challenge.id, out.result.ticks);
           setBest(out.result.ticks);
         }
+        setAnnounce(
+          out.result.status === "completed"
+            ? `Run complete in ${out.result.ticks} ticks.`
+            : `Run ended: ${out.result.deathCause}. ${out.result.packets} of ${challenge.rules.packetsToWin} packets.`,
+        );
       } else {
         setReproduced(false);
       }
@@ -102,6 +126,7 @@ export function App(): JSX.Element {
     let raf = 0;
     let last = performance.now();
     let acc = 0;
+    let packets = run.state.packets;
     const loop = (now: number) => {
       acc += Math.min(now - last, 250);
       last = now;
@@ -114,6 +139,14 @@ export function App(): JSX.Element {
       if (changed) {
         setState(run.state);
         setInputs([...run.inputs]);
+        if (run.state.packets !== packets) {
+          packets = run.state.packets;
+          setAnnounce(
+            run.state.exit
+              ? "All packets collected. Extraction gate open."
+              : `Packet ${packets} of ${challenge.rules.packetsToWin}.`,
+          );
+        }
       }
       if (run.state.status !== "running") {
         finish(run);
@@ -132,11 +165,14 @@ export function App(): JSX.Element {
     let i = 0;
     setState(s);
     setReplayCheck(null);
+    setAnnounce("Replaying recorded inputs.");
     setMode("replaying");
     const id = window.setInterval(() => {
       if (s.status !== "running") {
         window.clearInterval(id);
-        setReplayCheck(result ? stateHash(s) === result.finalStateHash : false);
+        const ok = result ? stateHash(s) === result.finalStateHash : false;
+        setReplayCheck(ok);
+        setAnnounce(ok ? "Replay reproduced the same final state." : "Replay did not match.");
         setMode("ended");
         return;
       }
@@ -147,23 +183,33 @@ export function App(): JSX.Element {
     }, challenge.rules.tickMs / 2);
   }, [challenge, result]);
 
+  const steer = useCallback(
+    (dir: Dir) => {
+      if (mode === "playing") runRef.current?.queue(dir);
+    },
+    [mode],
+  );
+
   // Keyboard.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const dir = KEYS[e.key];
       if (dir) {
-        e.preventDefault();
-        if (mode === "playing") runRef.current?.queue(dir);
+        if (mode === "playing") {
+          e.preventDefault();
+          steer(dir);
+        }
         return;
       }
-      if ((e.key === " " || e.key === "Enter") && (mode === "idle" || mode === "ended")) {
+      const onButton = (e.target as HTMLElement | null)?.closest?.("button");
+      if ((e.key === " " || e.key === "Enter") && !onButton && (mode === "idle" || mode === "ended")) {
         e.preventDefault();
         start();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mode, start]);
+  }, [mode, start, steer]);
 
   // Swipe (mobile).
   const touch = useRef<{ x: number; y: number } | null>(null);
@@ -185,8 +231,7 @@ export function App(): JSX.Element {
       if (mode === "idle" || mode === "ended") start();
       return;
     }
-    if (mode !== "playing") return;
-    runRef.current?.queue(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "R" : "L") : dy > 0 ? "D" : "U");
+    steer(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "R" : "L") : dy > 0 ? "D" : "U");
   };
 
   const logRef = useRef<HTMLOListElement>(null);
@@ -195,24 +240,26 @@ export function App(): JSX.Element {
   }, [inputs.length]);
 
   const { packetsToWin } = challenge.rules;
-  const statusLine =
+  const status =
     mode === "replaying"
-      ? "REPLAYING SIGNED INPUTS"
+      ? { text: "Replaying recorded inputs", tone: "verify" }
       : state.status === "completed"
-        ? "EXTRACTED"
+        ? { text: "Extracted", tone: "lime" }
         : state.status === "dead"
-          ? `TERMINATED · ${state.deathCause?.toUpperCase()}`
+          ? { text: `Terminated · ${state.deathCause}`, tone: "muted" }
           : state.exit
-            ? "GATE OPEN · EXTRACT"
+            ? { text: "Gate open · extract", tone: "lime" }
             : mode === "playing"
-              ? "RUN IN PROGRESS"
-              : "STANDBY";
+              ? { text: "Run in progress", tone: "text" }
+              : { text: "Standby", tone: "muted" };
 
   return (
     <div className="shell">
+      <a className="skip" href="#board">Skip to game</a>
+
       <header className="masthead">
         <h1 className="wordmark">
-          TRACE<span>//</span>RUN
+          TRACE<span aria-hidden="true">//</span><span className="sr-only"> </span>RUN
         </h1>
         <p className="tagline">Every move leaves proof.</p>
         <dl className="meta">
@@ -223,74 +270,109 @@ export function App(): JSX.Element {
       </header>
 
       <main className="stage">
-        <section className="arena">
+        <section className="arena" aria-label="Daily Circuit">
           <div className="hud">
-            <span className="stat"><em>Tick</em>{pad(state.tick)}</span>
-            <span className="stat"><em>Packets</em>{state.packets}/{packetsToWin}</span>
-            <span className="stat"><em>Moves</em>{pad(state.moves, 3)}</span>
-            <span className={`status ${state.status}`}>{statusLine}</span>
+            <div className="stat"><span className="label">Tick</span><span className="num">{pad(state.tick)}</span></div>
+            <div className="stat"><span className="label">Packets</span><span className="num">{state.packets}<small>/{packetsToWin}</small></span></div>
+            <div className="stat"><span className="label">Moves</span><span className="num">{pad(state.moves, 3)}</span></div>
+            <p className={`status tone-${status.tone}`}>{status.text}</p>
           </div>
 
-          <div className="board-wrap" onPointerDown={onPointerDown} onPointerUp={onPointerUp}>
-            <Board state={state} rules={challenge.rules} ghost={mode === "replaying"} />
+          <div className="board-wrap" id="board" onPointerDown={onPointerDown} onPointerUp={onPointerUp}>
+            <Board state={state} rules={challenge.rules} ghost={mode === "replaying"} still={reducedMotion} />
+            <span className="corner tl" aria-hidden="true" />
+            <span className="corner tr" aria-hidden="true" />
+            <span className="corner bl" aria-hidden="true" />
+            <span className="corner br" aria-hidden="true" />
 
             {mode === "idle" && (
               <div className="overlay">
-                <p className="kicker">Daily Circuit</p>
-                <h2>Collect {packetsToWin} packets. Reach the gate. Fewest ticks wins.</h2>
-                <p className="hint">Arrows / WASD · swipe on mobile</p>
-                <button className="primary" onClick={start}>Start run <kbd>Space</kbd></button>
+                <p className="kicker">Daily Circuit · {challenge.id.replace("daily-", "")}</p>
+                <h2 className="headline">Collect {packetsToWin} packets.<br />Reach the gate.<br /><em>Fewest ticks wins.</em></h2>
+                <p className="hint"><span className="hide-touch">Arrows / WASD to steer</span><span className="show-touch">Swipe or use the pad to steer</span></p>
+                <button className="btn primary" onClick={start} autoFocus>
+                  Start run <kbd className="hide-touch">Space</kbd>
+                </button>
               </div>
             )}
 
             {mode === "ended" && result && (
               <div className="overlay">
-                <p className="kicker">{result.status === "completed" ? "Run complete" : "Run terminated"}</p>
-                <h2 className="big">
-                  {result.status === "completed" ? `${result.ticks} ticks` : `${result.packets}/${packetsToWin} packets`}
-                </h2>
-                <ul className="checks">
-                  <li className={reproduced ? "ok" : "bad"}>
-                    {reproduced ? "Inputs reproduce this result" : "Replay mismatch"}
-                  </li>
-                  {replayCheck !== null && (
-                    <li className={replayCheck ? "ok" : "bad"}>
-                      {replayCheck ? "Replay re-verified" : "Replay check failed"}
-                    </li>
+                <p className={`kicker ${result.status === "completed" ? "tone-lime" : "tone-muted"}`}>
+                  {result.status === "completed" ? "Run complete" : `Terminated · ${result.deathCause}`}
+                </p>
+                <h2 className="score">
+                  {result.status === "completed" ? (
+                    <>{result.ticks}<small>ticks</small></>
+                  ) : (
+                    <>{result.packets}<small>/{packetsToWin} packets</small></>
                   )}
-                  <li className="pending">Wallet signature: connect QoreX (next milestone)</li>
-                </ul>
+                </h2>
+                <p className="hint">
+                  {result.moves} {result.moves === 1 ? "move" : "moves"}
+                  {best !== null && result.status === "completed" && result.ticks === best && " · personal best"}
+                </p>
                 <div className="actions">
-                  <button className="primary" onClick={start}>Run again <kbd>Space</kbd></button>
-                  <button onClick={watchReplay}>Watch replay</button>
+                  <button className="btn primary" onClick={start} autoFocus>
+                    Run again <kbd className="hide-touch">Space</kbd>
+                  </button>
+                  <button className="btn" onClick={watchReplay}>Watch replay</button>
                 </div>
               </div>
             )}
           </div>
+
+          <div className="pad show-touch" aria-label="Steering controls">
+            {(["U", "L", "D", "R"] as Dir[]).map((d) => (
+              <button
+                key={d}
+                className={`pad-btn pad-${d}`}
+                aria-label={`Steer ${DIR_NAME[d]}`}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  steer(d);
+                }}
+              >
+                {ARROW[d]}
+              </button>
+            ))}
+          </div>
         </section>
 
-        <aside className="trace">
-          <h3>Input trace</h3>
-          <p className="trace-sub">Only accepted turns are recorded. This log, not the score, is what gets signed.</p>
-          <ol className="log" ref={logRef}>
-            {inputs.length === 0 && <li className="empty">— awaiting first turn —</li>}
-            {inputs.map((i) => (
-              <li key={i.tick}>
-                <span className="t">t{pad(i.tick)}</span>
-                <span className="d">{ARROW[i.dir]} {i.dir}</span>
-              </li>
-            ))}
-          </ol>
-          <dl className="proof">
-            <div><dt>Replay SHA-256</dt><dd>{result ? short(result.replayHash) : "—"}</dd></div>
-            <div><dt>Final state</dt><dd>{result ? short(result.finalStateHash) : "—"}</dd></div>
-            <div><dt>Personal best</dt><dd>{best !== null ? `${best} ticks` : "—"}</dd></div>
-          </dl>
+        <aside className="side">
+          <Receipt
+            mode={mode}
+            challenge={challenge}
+            inputCount={inputs.length}
+            result={result}
+            reproduced={reproduced}
+            replayCheck={replayCheck}
+            best={best}
+          />
+
+          <section className="trace" aria-label="Input trace">
+            <header className="panel-head">
+              <h3>Input trace</h3>
+              <span className="count">{pad(inputs.length, 3)}</span>
+            </header>
+            <p className="panel-sub">Only accepted turns are recorded. This log, not the score, is what gets signed.</p>
+            <ol className="log" ref={logRef}>
+              {inputs.length === 0 && <li className="empty">Awaiting first turn</li>}
+              {inputs.map((i) => (
+                <li key={i.tick}>
+                  <span className="t">t{pad(i.tick)}</span>
+                  <span className="d">{ARROW[i.dir]} {i.dir}</span>
+                </li>
+              ))}
+            </ol>
+          </section>
         </aside>
       </main>
 
+      <p className="sr-only" aria-live="polite">{announce}</p>
+
       <footer className="foot">
-        <span>Verified = these signed inputs reproduce this score. Not proof that a human played.</span>
+        <span>Verified means these signed inputs reproduce this score. It does not prove a human played.</span>
         <span>QoreChain · Build Before Q-Day</span>
       </footer>
     </div>
