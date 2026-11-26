@@ -11,10 +11,10 @@
     "contracts"
   ],
   "scripts": {
-    "test": "npm run test -w @tracerun/engine",
+    "test": "npm run test -w @tracerun/engine && npm run test -w server",
     "test:contracts": "npm run test -w contracts",
-    "build:engine": "npm run build -w @tracerun/engine",
     "dev:web": "npm run dev -w web",
+    "dev:server": "npm run dev -w server",
     "build:web": "npm run build -w web"
   }
 }

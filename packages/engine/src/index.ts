@@ -5,3 +5,4 @@ export * from "./hash.js";
 export * from "./replay.js";
 export * from "./run.js";
 export * from "./commitment.js";
+export * from "./anchor.js";

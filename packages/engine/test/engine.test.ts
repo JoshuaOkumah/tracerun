@@ -191,3 +191,15 @@ test("leaderboard order and commitment message", () => {
   assert.match(msg, /^TRACE\/\/RUN\/v1\n/);
   assert.throws(() => buildCommitment({ chainId: "x\ny", challengeId: "a", sessionNonce: "b", address: "c", ruleset: "d", replaySha256: r.result.replayHash }));
 });
+
+test("anchor memo round-trips and fits the 256-byte memo limit", async () => {
+  const { buildAnchorMemo, parseAnchorMemo } = await import("../src/index.js");
+  const h = "ab".repeat(32);
+  const memo = buildAnchorMemo("daily-2026-11-26", h);
+  assert.equal(memo, `TRACE//RUN v1 daily-2026-11-26 ${h}`);
+  assert.ok(new TextEncoder().encode(memo).length <= 256);
+  assert.deepEqual(parseAnchorMemo(memo), { challengeId: "daily-2026-11-26", replaySha256: h });
+  assert.equal(parseAnchorMemo(memo + " extra"), null);
+  assert.throws(() => buildAnchorMemo("daily 2026", h));
+  assert.throws(() => buildAnchorMemo("daily-2026-11-26", "XYZ"));
+});
