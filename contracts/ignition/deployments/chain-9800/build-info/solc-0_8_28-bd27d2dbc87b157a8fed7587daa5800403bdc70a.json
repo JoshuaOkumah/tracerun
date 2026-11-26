@@ -1,0 +1,49 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_28-bd27d2dbc87b157a8fed7587daa5800403bdc70a",
+  "solcVersion": "0.8.28",
+  "solcLongVersion": "0.8.28+commit.7893614a",
+  "compilerType": "solc",
+  "toolVersions": {
+    "hardhat": "3.22.0"
+  },
+  "userSourceNameMap": {
+    "contracts/RunRegistry.sol": "project/contracts/RunRegistry.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "cancun",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode.linkReferences",
+            "evm.bytecode.object",
+            "evm.bytecode.opcodes",
+            "evm.bytecode.sourceMap",
+            "evm.deployedBytecode.immutableReferences",
+            "evm.deployedBytecode.linkReferences",
+            "evm.deployedBytecode.object",
+            "evm.deployedBytecode.opcodes",
+            "evm.deployedBytecode.sourceMap",
+            "evm.methodIdentifiers"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/RunRegistry.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\n\n/// @title RunRegistry\n/// @notice Public record of TRACE//RUN runs that the verification server has\n///         replayed and accepted. Anyone can read a record and check it against\n///         the published replay log: hash the log, compare it with `replayHash`.\n/// @dev    Only the verifier (the server's key) can write, so a record here means\n///         \"the verifier reproduced this score from these inputs\". The contract\n///         does not replay games itself, and it does not prove a human played.\ncontract RunRegistry {\n    enum Outcome {\n        Dead,\n        Completed\n    }\n\n    struct Run {\n        bytes32 challengeId; // e.g. keccak256(\"daily-2026-11-26\")\n        bytes32 replayHash; // SHA-256 of the canonical TRACE-RUN-REPLAY-V1 encoding\n        bytes32 ruleset; // e.g. \"snake-v1\" as bytes32\n        string player; // QoreChain address of the signer (qor1...)\n        uint32 ticks;\n        uint16 packets;\n        uint16 moves;\n        Outcome outcome;\n        uint64 recordedAt; // block timestamp\n    }\n\n    address public owner;\n    address public verifier;\n    uint256 public runCount;\n\n    /// @dev key = keccak256(abi.encode(challengeId, replayHash)). One record per replay.\n    mapping(bytes32 => Run) private runs;\n\n    event RunRecorded(\n        bytes32 indexed key,\n        bytes32 indexed challengeId,\n        bytes32 replayHash,\n        string player,\n        uint32 ticks,\n        Outcome outcome\n    );\n    event VerifierChanged(address indexed previous, address indexed current);\n    event OwnershipTransferred(address indexed previous, address indexed current);\n\n    error NotOwner();\n    error NotVerifier();\n    error ZeroAddress();\n    error EmptyField();\n    error AlreadyRecorded(bytes32 key);\n    error UnknownRun(bytes32 key);\n\n    modifier onlyOwner() {\n        if (msg.sender != owner) revert NotOwner();\n        _;\n    }\n\n    modifier onlyVerifier() {\n        if (msg.sender != verifier) revert NotVerifier();\n        _;\n    }\n\n    constructor(address initialVerifier) {\n        if (initialVerifier == address(0)) revert ZeroAddress();\n        owner = msg.sender;\n        verifier = initialVerifier;\n        emit OwnershipTransferred(address(0), msg.sender);\n        emit VerifierChanged(address(0), initialVerifier);\n    }\n\n    /// @notice The storage key for a run.\n    function keyOf(bytes32 challengeId, bytes32 replayHash) public pure returns (bytes32) {\n        return keccak256(abi.encode(challengeId, replayHash));\n    }\n\n    /// @notice Record a run the verifier has replayed and accepted.\n    function record(\n        bytes32 challengeId,\n        bytes32 replayHash,\n        bytes32 ruleset,\n        string calldata player,\n        uint32 ticks,\n        uint16 packets,\n        uint16 moves,\n        Outcome outcome\n    ) external onlyVerifier returns (bytes32 key) {\n        if (challengeId == bytes32(0) || replayHash == bytes32(0) || ruleset == bytes32(0) || bytes(player).length == 0) {\n            revert EmptyField();\n        }\n        key = keyOf(challengeId, replayHash);\n        if (runs[key].recordedAt != 0) revert AlreadyRecorded(key);\n\n        runs[key] = Run({\n            challengeId: challengeId,\n            replayHash: replayHash,\n            ruleset: ruleset,\n            player: player,\n            ticks: ticks,\n            packets: packets,\n            moves: moves,\n            outcome: outcome,\n            recordedAt: uint64(block.timestamp)\n        });\n        unchecked {\n            runCount += 1;\n        }\n        emit RunRecorded(key, challengeId, replayHash, player, ticks, outcome);\n    }\n\n    /// @notice Read a recorded run. Reverts if there is none.\n    function getRun(bytes32 key) external view returns (Run memory) {\n        Run memory r = runs[key];\n        if (r.recordedAt == 0) revert UnknownRun(key);\n        return r;\n    }\n\n    /// @notice Whether a replay has been recorded for a challenge.\n    function isRecorded(bytes32 challengeId, bytes32 replayHash) external view returns (bool) {\n        return runs[keyOf(challengeId, replayHash)].recordedAt != 0;\n    }\n\n    function setVerifier(address next) external onlyOwner {\n        if (next == address(0)) revert ZeroAddress();\n        emit VerifierChanged(verifier, next);\n        verifier = next;\n    }\n\n    function transferOwnership(address next) external onlyOwner {\n        if (next == address(0)) revert ZeroAddress();\n        emit OwnershipTransferred(owner, next);\n        owner = next;\n    }\n}\n"
+      }
+    }
+  }
+}
