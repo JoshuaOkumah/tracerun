@@ -1,0 +1,14 @@
+{
+  "name": "tracerun",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TRACE//RUN: Proof-of-Play Snake on QoreChain. Every move leaves proof.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": ["packages/*", "apps/*", "contracts"],
+  "scripts": {
+    "test": "npm run test -w @tracerun/engine",
+    "build:engine": "npm run build -w @tracerun/engine",
+    "dev:web": "npm run dev -w web"
+  }
+}
