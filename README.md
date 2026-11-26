@@ -12,6 +12,16 @@ Most leaderboards ask you to trust the score. TRACE//RUN publishes the replay in
 4. **Verify.** The server checks the signature against the player's registered post-quantum key, then replays the run with the shared engine. Only the replayed result is ranked.
 5. **Anchor.** A player can anchor a personal best in a hybrid-signed native QoreChain transaction (`signAndBroadcast`, replay hash in the memo). Verified runs are also recorded in a `RunRegistry` contract on the Diana testnet.
 
+## On-chain proof (Diana testnet)
+
+| What | Value |
+|---|---|
+| Hybrid-signed transaction (`MsgOpenEVMWindow`, ML-DSA-87 + secp256k1) | [`9DD781F95686D29EB378DD03863507C7485534FBCDC5EB3BC18115474DE13280`](https://api-testnet.qore.host/cosmos/tx/v1beta1/txs/9DD781F95686D29EB378DD03863507C7485534FBCDC5EB3BC18115474DE13280) |
+| Block / time | 10794407 · 2026-11-26 14:53:38 UTC |
+| Chain's PQC check | `pqc_verify`: algorithm `dilithium5`, `hybrid_mode: required`, `status: verified` |
+| Deployer | `qor1akrult2udv80u6qmtr6wr5e0w74nchl6qh5q4h` |
+| `RunRegistry` contract (EVM, chain 9800) | `0x995b59611DFC742b614E11c03659c90e1F24feA9` |
+
 ## What "verified" means
 
 A verified run means these signed inputs reproduce this score, under this ruleset. It does **not** prove a human pressed the keys: a bot can generate a legal run. That is a separate problem, and we don't claim to solve it.
@@ -44,7 +54,7 @@ Testnet: `qorechain-diana` (EVM chain ID 9800). Free test QOR from the [faucet](
 - [ ] Server replay verification + leaderboard
 - [ ] QoreX connection, hybrid-signed anchor tx
 - [x] `RunRegistry` contract + tests
-- [ ] `RunRegistry` deployed on testnet
+- [x] `RunRegistry` deployed on testnet, after a hybrid-signed window tx
 - [ ] Race the Ghost
 
 ## Design
