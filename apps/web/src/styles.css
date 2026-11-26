@@ -347,7 +347,6 @@ kbd {
   .wordmark { font-size: 38px; }
   .tagline { grid-column: 1 / -1; order: 3; display: none; }
   .meta { grid-column: 1 / -1; gap: 14px; }
-  .meta div:nth-child(2) { display: none; }
   .hud { gap: 18px; }
   .num { font-size: 30px; }
   .status { width: 100%; order: -1; margin: 0 0 6px; }
@@ -384,4 +383,83 @@ kbd {
   .pad-L { grid-column: 1; grid-row: 2; }
   .pad-D { grid-column: 2; grid-row: 2; }
   .pad-R { grid-column: 3; grid-row: 2; }
+}
+
+/* ── Wallet, notices, leaderboard, submission states ── */
+.masthead { grid-template-columns: auto 1fr auto auto; }
+.wallet { display: flex; align-items: flex-end; margin-bottom: 2px; }
+.btn.small { min-height: 36px; padding: 8px 12px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.wallet-state { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+.wallet-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--line-strong); padding: 8px 12px; font-size: 12px;
+}
+.wallet-chip .dot { width: 7px; height: 7px; background: var(--teal); }
+
+.notice {
+  position: relative;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--warn);
+  background: var(--surface-2);
+  padding: 10px 40px 10px 14px;
+  font-size: 12px;
+}
+.notice strong { color: var(--warn); font-weight: 500; margin-right: 6px; }
+.notice-x {
+  position: absolute; top: 4px; right: 6px; background: none; border: 0;
+  color: var(--muted); font: 18px var(--mono); cursor: pointer; padding: 4px 8px;
+}
+
+.overlay-error { margin: 4px 0 0; color: var(--warn); max-width: 46ch; }
+.overlay-error strong { font-weight: 500; }
+.checks a, .ladder a { color: inherit; text-underline-offset: 3px; }
+
+.ladder .working .mark { border: 1px solid var(--teal); animation: blink 0.9s steps(2) infinite; }
+.ladder .working .state, .ladder .working .why { color: var(--teal); }
+.ladder .failed .mark { border: 1px solid var(--warn); }
+.ladder .failed .state, .ladder .failed .why { color: var(--warn); }
+.ladder .anchored .why, .ladder .verified .why { color: var(--text); }
+.receipt-error { margin: -4px 0 12px; color: var(--warn); font-size: 11.5px; line-height: 1.5; }
+
+.board-list { background: var(--surface); border: 1px solid var(--line); padding: 14px 16px 12px; }
+.ranks { list-style: none; margin: 10px 0 0; padding: 0; border-top: 1px solid var(--line); }
+.ranks li {
+  display: grid;
+  grid-template-columns: 26px 1fr auto auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.ranks li.me { background: linear-gradient(90deg, rgba(214, 255, 95, 0.07), transparent 70%); }
+.ranks .rank { font: 600 17px var(--display); color: var(--muted); }
+.ranks li:first-child .rank { color: var(--lime); }
+.ranks .who { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ranks .who em { font-style: normal; color: var(--lime); }
+.ranks .score { font: 600 17px var(--display); }
+.ranks .seal { font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; padding: 2px 6px; border: 1px solid; }
+.ranks .seal.anchored { color: var(--teal); }
+.ranks .seal.verified { color: var(--muted); }
+.ranks .watch {
+  font: 500 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text); background: transparent; border: 1px solid var(--line-strong);
+  padding: 5px 8px; min-height: 30px; cursor: pointer;
+}
+.ranks .watch:hover:not(:disabled) { border-color: var(--teal); color: var(--teal); }
+.ranks .watch:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.overlay .kicker.tone-verify { color: var(--teal); }
+
+@media (max-width: 980px) {
+  .masthead { grid-template-columns: auto 1fr auto; }
+  .wallet { grid-column: 3; grid-row: 1; }
+  .side { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .masthead { grid-template-columns: 1fr auto; }
+  .wallet { grid-column: 2; grid-row: 1; align-items: center; }
+  .meta div:nth-child(2) { display: block; }
+  .meta div:nth-child(3) { display: none; }
 }
