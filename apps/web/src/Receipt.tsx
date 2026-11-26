@@ -1,37 +1,70 @@
 import type { Challenge, RunResult } from "@tracerun/engine";
+import type { RunSummary } from "./lib/api";
 
-type Mode = "idle" | "playing" | "ended" | "replaying";
+export type Phase = "idle" | "signing" | "confirming" | "verifying" | "verified" | "failed";
+
+export interface Submission {
+  phase: Phase;
+  txHash?: string;
+  run?: RunSummary;
+  error?: { title: string; detail: string };
+}
 
 interface Props {
-  mode: Mode;
   challenge: Challenge;
   inputCount: number;
   result: RunResult | null;
+  ranked: boolean;
+  submission: Submission;
   /** Local self-check: the browser's own replay matched. Never shown as VERIFIED. */
   reproduced: boolean | null;
   replayCheck: boolean | null;
   best: number | null;
+  txUrl: (hash: string) => string;
 }
 
 const short = (h: string) => `${h.slice(0, 8)}…${h.slice(-6)}`;
 
 /**
- * The run receipt. Its three states are only ever claimed when the
- * corresponding operation has actually succeeded:
+ * The run receipt. Each state is claimed only after that step has succeeded:
  *   PLAYED   – the run finished in this browser.
- *   VERIFIED – the server replayed the inputs and checked the QoreX signature.
- *   ANCHORED – the proof receipt was recorded on QoreChain.
- * VERIFIED and ANCHORED need the server and QoreX, which are not wired yet,
- * so they are shown as not reached, with the reason.
+ *   VERIFIED – the server replayed the inputs and checked the player's signed transaction.
+ *   ANCHORED – that transaction, carrying the run memo and an ML-DSA-87 layer, is committed on QoreChain.
  */
-export function Receipt({ mode, challenge, inputCount, result, reproduced, replayCheck, best }: Props): JSX.Element {
-  const played = result !== null && (mode === "ended" || mode === "replaying");
+export function Receipt({ challenge, inputCount, result, ranked, submission, reproduced, replayCheck, best, txUrl }: Props): JSX.Element {
+  const played = result !== null;
+  const { phase, run, txHash, error } = submission;
+  const verified = phase === "verified" && run?.verified === true;
+  const anchored = verified && run?.anchor != null;
+  const busy = phase === "signing" || phase === "confirming" || phase === "verifying";
+
+  const verifyWhy = (() => {
+    if (verified) {
+      return run!.status === "completed"
+        ? `Server replay matched · ${run!.ticks} ticks`
+        : `Server replay matched · ${run!.packets}/${challenge.rules.packetsToWin} packets`;
+    }
+    if (!played) return "Finish a run";
+    if (!ranked) return "Practice run: connect QoreX before starting to rank";
+    if (phase === "signing") return "Approve the transaction in QoreX";
+    if (phase === "confirming") return "Waiting for the block";
+    if (phase === "verifying") return "Server replaying your inputs";
+    if (phase === "failed") return error?.title ?? "Failed";
+    return "Submit proof to verify";
+  })();
+
+  const anchorWhy = (() => {
+    if (anchored) return null;
+    if (txHash) return `Tx sent · ${short(txHash)}`;
+    if (!ranked && played) return "Not ranked";
+    return "Needs your hybrid-signed QoreChain tx";
+  })();
 
   return (
-    <section className="receipt" aria-label="Run receipt">
+    <section className="receipt" aria-label="Run receipt" aria-busy={busy}>
       <header className="panel-head">
         <h3>Run receipt</h3>
-        <span className="count">{challenge.rules.version}</span>
+        <span className="count">{ranked ? "Ranked" : "Practice"} · {challenge.rules.version}</span>
       </header>
 
       <ol className="ladder">
@@ -40,17 +73,27 @@ export function Receipt({ mode, challenge, inputCount, result, reproduced, repla
           <span className="state">Played</span>
           <span className="why">{played ? `${inputCount} inputs recorded` : "Finish a run"}</span>
         </li>
-        <li className="open">
+        <li className={verified ? "reached verified" : busy ? "open working" : phase === "failed" ? "open failed" : "open"}>
           <span className="mark" aria-hidden="true" />
           <span className="state">Verified</span>
-          <span className="why">Needs QoreX signature + server replay</span>
+          <span className="why">{verifyWhy}</span>
         </li>
-        <li className="open">
+        <li className={anchored ? "reached anchored" : "open"}>
           <span className="mark" aria-hidden="true" />
           <span className="state">Anchored</span>
-          <span className="why">Needs a hybrid-signed QoreChain tx</span>
+          <span className="why">
+            {anchored ? (
+              <a href={txUrl(run!.anchor!.txHash)} target="_blank" rel="noreferrer">
+                Block {run!.anchor!.height} · {short(run!.anchor!.txHash)}
+              </a>
+            ) : (
+              anchorWhy
+            )}
+          </span>
         </li>
       </ol>
+
+      {phase === "failed" && error && <p className="receipt-error" role="alert">{error.detail}</p>}
 
       <dl className="fields">
         <div><dt>Replay SHA-256</dt><dd>{result ? short(result.replayHash) : "—"}</dd></div>
