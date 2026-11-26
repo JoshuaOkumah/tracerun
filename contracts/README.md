@@ -1,103 +1,47 @@
-# QoreChain Hardhat starter
+# TRACE//RUN contracts
 
-A [Hardhat 3](https://hardhat.org) project for the QoreChain EVM, using the
-viem toolbox: a `Counter` contract, tests on Hardhat's simulated network, an
-Ignition deploy module, and a small helper that opens the EVM authorisation
-window your deployer needs.
+`RunRegistry` is the public record of runs the TRACE//RUN verifier has replayed and accepted. Each record holds the challenge, the replay's SHA-256, the ruleset, the player's QoreChain address and the result. Anyone can check a record by hashing the published replay log and comparing.
+
+Scaffolded from the `create-qorechain-dapp` **hardhat** template (Hardhat 3 + viem), which also provides `scripts/window.ts`, the EVM authorisation window helper.
 
 | Network | EVM chain id | Hardhat network | RPC |
 | --- | --- | --- | --- |
 | Testnet (`qorechain-diana`) | 9800 | `qorechainTestnet` | `https://evm-testnet.qore.host` |
-| Mainnet (`qorechain-vladi`) | 9801 | `qorechain` | `https://evm.qore.host` |
 
-## Prerequisites
+## Contract
 
-- Node.js 22 or later (Hardhat 3 requires it).
-- A funded account on the network you deploy to.
+- `record(challengeId, replayHash, ruleset, player, ticks, packets, moves, outcome)`: verifier only. One record per `(challengeId, replayHash)`; a duplicate reverts.
+- `getRun(key)`, `isRecorded(challengeId, replayHash)`, `keyOf(challengeId, replayHash)`, `runCount()`: public reads.
+- `setVerifier`, `transferOwnership`: owner only.
 
-## Setup
-
-```sh
-pnpm install
-cp .env.example .env   # the scaffolder already did this
-```
-
-Put the deployer's key in `.env` (`PRIVATE_KEY`), or store it encrypted with
-`npx hardhat keystore set PRIVATE_KEY`. Never commit `.env`.
+A record means "the verifier reproduced this score from these inputs". The contract does not replay games itself, and it does not prove a human played.
 
 ## Build and test
 
-```sh
-pnpm build    # hardhat build
-pnpm test     # hardhat test, on the simulated network
-```
-
-## Before you deploy: open an EVM window
-
-QoreChain admits an EVM transaction only when the sender has:
-
-1. a registered **ML-DSA-87** key, and
-2. a live **EVM authorisation window**.
-
-Both are set up on QoreChain's native lane with messages signed with the
-post-quantum key, so the secp256k1 key in `PRIVATE_KEY` can never authorise
-spending on its own. A deploy from an account without them is refused, so do
-this first:
+Node.js 22+. From the repo root:
 
 ```sh
-pnpm window status     # account, PQC key, window
-pnpm window register   # once per account: registers its ML-DSA-87 key
-pnpm window open       # opens a window: 600 blocks, 5 transactions
+npm install
+npm run build -w contracts
+npm test -w contracts      # RunRegistry tests on Hardhat's simulated network
 ```
 
-With `QORE_MNEMONIC` set, the helper derives the account and its ML-DSA-87 key
-from the mnemonic. Otherwise it uses `PRIVATE_KEY` for the account and a PQC
-recovery code, `QORE_PQC_RECOVERY_CODE`, for the ML-DSA-87 key; it stops with a
-message if the code is missing. Create a code once and put it in `.env`:
+## Deploy to the Diana testnet
+
+QoreChain admits an EVM transaction only when the sender has a registered **ML-DSA-87** key and a live **EVM authorisation window**. Both are set up on the native lane, and opening the window is a **hybrid-signed** (secp256k1 + ML-DSA-87) transaction.
+
+1. Fund the deployer from the [faucet](https://dashboard.qorechain.io/faucet).
+2. Put credentials in `contracts/.env` (never commit it): either `QORE_MNEMONIC`, or `PRIVATE_KEY` plus `QORE_PQC_RECOVERY_CODE` (create one with `npm run window -w contracts -- recovery-code` and keep it safe).
+3. Run:
 
 ```sh
-pnpm window recovery-code   # prints a new QRC1 code (generatePqcRecoveryCode)
+npm run window -w contracts -- status     # account, PQC key, window
+npm run window -w contracts -- register   # once: registers the ML-DSA-87 key
+npm run window -w contracts -- open       # hybrid-signed tx: prints its hash
+# wait ~10 seconds for the window to settle, then:
+npm run deploy:testnet -w contracts
 ```
 
-Keep a copy of the code apart from the private key and keep using the same
-one: a different code gives the account a different ML-DSA-87 key. If the
-account already has a key registered by another wallet, open the window from
-that wallet instead. An account registered with this helper before SDK 0.13.0
-has a different key registered; `pnpm window status` then shows
-"registered, but NOT this key". Rotate it to the recovery-code key with
-`rotatePqcKeyMsg` (MsgRotatePQCKey), loading the old key with
-`unifiedAccountFromSeed(seed, { legacySeedDerivation: true })` (see the
-`@qorechain/sdk` README).
+Record both outputs: the **window tx hash** (your hybrid-signed transaction) and the **RunRegistry address**. They go in the root README and the submission form.
 
-- The window bounds blocks, EVM transactions, and the total they may spend:
-  value **plus** the maximum fee (gas limit x fee cap) of each transaction.
-  `pnpm window open` sizes it for transactions of up to 3,000,000 gas at a
-  250 gwei fee cap; set `QORE_WINDOW_MAX_UQOR` to choose the total yourself.
-- `blocks` is a block count, not a duration.
-- Opening a window **advances the account's nonce**. Open it first, then
-  deploy. Hardhat Ignition waits for 5 confirmations of the account's last
-  transaction, so give the window about 10 seconds to settle before
-  `pnpm deploy:testnet`; otherwise it stops with HHE10402 and you run it again.
-- Opening replaces any earlier window.
-
-## Deploy
-
-```sh
-pnpm window open
-pnpm deploy:testnet
-# = hardhat ignition deploy ignition/modules/Counter.ts --network qorechainTestnet
-```
-
-Pass `--parameters` to Ignition to change the initial count.
-
-Contract verification: Sourcify does not list chain ids 9800 and 9801 yet.
-
-## Project layout
-
-```
-contracts/Counter.sol          the contract
-test/Counter.ts                tests (node:test + viem)
-ignition/modules/Counter.ts    the deploy module
-scripts/window.ts              the EVM window helper (pnpm window)
-hardhat.config.ts              compiler settings and the QoreChain networks
-```
+Notes from the template: opening a window advances the account's nonce, so open it and then deploy. If Ignition stops with HHE10402, wait a few seconds and run the deploy again. Opening a new window replaces the old one. Sourcify does not list chain 9800 yet, so source verification is not available.

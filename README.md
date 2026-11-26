@@ -22,13 +22,14 @@ A verified run means these signed inputs reproduce this score, under this rulese
 |---|---|
 | `packages/engine` | Deterministic Snake engine, replay verifier, replay hashing, QoreX commitment builder. No UI or wallet deps. |
 | `apps/web` | Vite + React frontend (scaffolded with `create-qorechain-dapp`, `fullstack-web` template). |
-| `contracts` | Hardhat 3 project for the `RunRegistry` contract (scaffolded with `create-qorechain-dapp`, `hardhat` template). |
+| `contracts` | `RunRegistry` contract, tests and Ignition deploy module (scaffolded with `create-qorechain-dapp`, `hardhat` template). See [contracts/README.md](contracts/README.md) for deploying to Diana. |
 
 ## Getting started
 
 ```bash
 npm install
 npm test                       # engine tests
+npm run test:contracts         # RunRegistry tests
 npm run dev:web                # play at http://localhost:5173
 cp apps/web/.env.example apps/web/.env        # testnet endpoints
 cp contracts/.env.example contracts/.env      # never commit real keys
@@ -42,8 +43,13 @@ Testnet: `qorechain-diana` (EVM chain ID 9800). Free test QOR from the [faucet](
 - [x] Playable canvas frontend (Daily Circuit, input trace, watch replay with self-check)
 - [ ] Server replay verification + leaderboard
 - [ ] QoreX connection, hybrid-signed anchor tx
+- [x] `RunRegistry` contract + tests
 - [ ] `RunRegistry` deployed on testnet
 - [ ] Race the Ghost
+
+## Design
+
+"Forensic Arcade": IBM Plex Mono for data, Barlow Condensed for scores, self-hosted. Lime marks the player and the goal, teal marks verification, orange is reserved for real failures (losing a run is shown neutrally). The run receipt only claims PLAYED, VERIFIED or ANCHORED once that step has actually succeeded. Checked with axe-core (WCAG 2 A/AA): no violations on desktop or mobile. Respects `prefers-reduced-motion`.
 
 ## Credits
 
@@ -51,6 +57,8 @@ Testnet: `qorechain-diana` (EVM chain ID 9800). Free test QOR from the [faucet](
 - [`@qorechain/sdk`](https://www.npmjs.com/package/@qorechain/sdk), [`@qorechain/qoresign`](https://www.npmjs.com/package/@qorechain/qoresign) and the QoreX wallet.
 - [`@noble/hashes`](https://github.com/paulmillr/noble-hashes) for SHA-256.
 - mulberry32 PRNG (public domain).
+- [Barlow Condensed](https://fonts.google.com/specimen/Barlow+Condensed) and [IBM Plex Mono](https://github.com/IBM/plex) (SIL Open Font License), via Fontsource.
+- Built with AI assistance (Claude) for code and review. Design decisions, testing and the submission are the author's.
 
 ## License
 

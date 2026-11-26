@@ -5,10 +5,16 @@
   "description": "TRACE//RUN: Proof-of-Play Snake on QoreChain. Every move leaves proof.",
   "license": "MIT",
   "type": "module",
-  "workspaces": ["packages/*", "apps/*", "contracts"],
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "contracts"
+  ],
   "scripts": {
     "test": "npm run test -w @tracerun/engine",
+    "test:contracts": "npm run test -w contracts",
     "build:engine": "npm run build -w @tracerun/engine",
-    "dev:web": "npm run dev -w web"
+    "dev:web": "npm run dev -w web",
+    "build:web": "npm run build -w web"
   }
 }

@@ -3,12 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "A Hardhat 3 project for the QoreChain EVM, with a helper that opens the EVM authorisation window.",
+  "description": "TRACE//RUN contracts: RunRegistry on the QoreChain EVM (Hardhat 3, from the create-qorechain-dapp hardhat template).",
   "scripts": {
     "build": "hardhat build",
     "test": "hardhat test",
     "window": "tsx --env-file=.env scripts/window.ts",
-    "deploy:testnet": "hardhat ignition deploy ignition/modules/Counter.ts --network qorechainTestnet",
+    "deploy:testnet": "hardhat ignition deploy ignition/modules/RunRegistry.ts --network qorechainTestnet",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
