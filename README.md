@@ -29,7 +29,8 @@ A verified run means these signed inputs reproduce this score, under this rulese
 ```bash
 npm install
 npm test                       # engine tests
-cp apps/web/.env.example apps/web/.env
+npm run dev:web                # play at http://localhost:5173
+cp apps/web/.env.example apps/web/.env        # testnet endpoints
 cp contracts/.env.example contracts/.env      # never commit real keys
 ```
 
@@ -38,11 +39,11 @@ Testnet: `qorechain-diana` (EVM chain ID 9800). Free test QOR from the [faucet](
 ## Status
 
 - [x] Deterministic engine with tests
-- [ ] Playable canvas frontend
+- [x] Playable canvas frontend (Daily Circuit, input trace, watch replay with self-check)
 - [ ] Server replay verification + leaderboard
 - [ ] QoreX connection, hybrid-signed anchor tx
 - [ ] `RunRegistry` deployed on testnet
-- [ ] Watch Replay / Race the Ghost
+- [ ] Race the Ghost
 
 ## Credits
 

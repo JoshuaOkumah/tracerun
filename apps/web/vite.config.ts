@@ -1,4 +1,5 @@
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv } from "vite";
 
 // The public REST API sends no CORS headers, so the browser reaches it through
@@ -13,6 +14,12 @@ export default defineConfig(({ mode }) => {
   };
   return {
     plugins: [react()],
+    // Use the engine straight from source so the browser and server run identical code.
+    resolve: {
+      alias: {
+        "@tracerun/engine": fileURLToPath(new URL("../../packages/engine/src/index.ts", import.meta.url)),
+      },
+    },
     server: { port: 5173, proxy },
     preview: { proxy },
   };
