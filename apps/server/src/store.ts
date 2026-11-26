@@ -25,10 +25,17 @@ export interface RunRecord {
   sessionNonce: string;
   inputs: Input[];
   result: RunResult;
-  /** The exact commitment text the server rebuilt and verified the signature against. */
+  /**
+   * How the player proved this run:
+   * - "tx": a hybrid-signed QoreChain transaction whose memo is `commitment`
+   *   (the run is anchored by the same transaction);
+   * - "message": a QoreX signArbitrary signature over `commitment`.
+   */
+  proof: "tx" | "message";
+  /** The exact text the server rebuilt and checked: the run memo, or the signed commitment. */
   commitment: string;
-  /** The QoreX signArbitrary result, kept so anyone can re-check it. */
-  signature: unknown;
+  /** The QoreX signArbitrary result ("message" proofs), kept so anyone can re-check it. */
+  signature?: unknown;
   submittedAt: number;
   anchor?: Anchor;
 }

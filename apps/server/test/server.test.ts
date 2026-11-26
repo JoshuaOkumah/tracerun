@@ -10,7 +10,7 @@ import {
   verifyMessage,
 } from "@qorechain/qoresign";
 import type { InspectedTransaction } from "@qorechain/qoresign/network";
-import { LiveRun, buildAnchorMemo, buildCommitment, canTurn, type Challenge, type Dir, type Input } from "@tracerun/engine";
+import { LiveRun, buildAnchorMemo, buildCommitment, buildRunMemo, replayHash, canTurn, type Challenge, type Dir, type Input } from "@tracerun/engine";
 import { createApp } from "../src/app.js";
 import type { ChainAdapter } from "../src/chain.js";
 import type { Config } from "../src/config.js";
@@ -245,5 +245,75 @@ describe("TRACE//RUN verification server", () => {
     assert.equal(detail.status, 200);
     assert.ok(Array.isArray(detail.json.inputs));
     assert.match(detail.json.commitment, /^TRACE\/\/RUN\/v1\n/);
+  });
+
+  describe("runs proven by a hybrid-signed QoreX transaction", () => {
+    const mkTx = (hash: string, memo: string, who: typeof alice, over: Partial<InspectedTransaction> = {}): InspectedTransaction => ({
+      txhash: hash,
+      chainId: CHAIN_ID,
+      height: 10800000n,
+      code: 0,
+      codespace: "",
+      memo,
+      messages: [],
+      signer: { address: who.address, keyType: "secp256k1", publicKey: "", sequence: 1n },
+      fee: { amount: [], gasLimit: 400000n },
+      pqLayer: { present: true, count: 1, algorithmId: 1, verified: true },
+      tier: "pqc",
+      ...over,
+    });
+    let n = 0;
+    const hash = () => (++n).toString(16).padStart(64, "a").toUpperCase();
+
+    async function txRun(who: typeof alice, turns: Dir[], over: Partial<InspectedTransaction> = {}, memoNonce?: string) {
+      const { sessionNonce, challenge } = await startSession(who);
+      const inputs = play(challenge, turns);
+      const memo = buildRunMemo(challenge.id, memoNonce ?? sessionNonce, replayHash(challenge, inputs));
+      const h = hash();
+      txs.set(h, mkTx(h, memo, who, over));
+      const res = await api("POST", "/api/runs", { sessionNonce, address: who.address, inputs, txHash: h });
+      return { sessionNonce, inputs, h, res };
+    }
+
+    it("verifies and anchors in one step", async () => {
+      const { res, h } = await txRun(bob, ["U", "R", "R", "D"]);
+      assert.equal(res.status, 201, JSON.stringify(res.json));
+      assert.equal(res.json.run.proof, "tx");
+      assert.equal(res.json.run.verified, true);
+      assert.equal(res.json.run.anchor.txHash, h);
+      const detail = await api("GET", `/api/runs/${res.json.run.id}`);
+      assert.match(detail.json.commitment, /^TRACE\/\/RUN v1 daily-2026-11-26 [0-9a-f]{32} [0-9a-f]{64}$/);
+    });
+
+    it("refuses a tx whose memo names another session", async () => {
+      const { res } = await txRun(bob, ["D", "R"], {}, "f".repeat(32));
+      assert.equal(res.json.error, "memo-mismatch");
+    });
+
+    it("refuses a tx signed by someone else", async () => {
+      const { sessionNonce, challenge } = await startSession(bob);
+      const inputs: Input[] = [{ tick: 1, dir: "U" }]; // unique: other tests only turn on ticks divisible by 3
+      const h = hash();
+      txs.set(h, mkTx(h, buildRunMemo(challenge.id, sessionNonce, replayHash(challenge, inputs)), alice));
+      const res = await api("POST", "/api/runs", { sessionNonce, address: bob.address, inputs, txHash: h });
+      assert.equal(res.json.error, "signer-mismatch");
+    });
+
+    it("refuses a tx without a verified ML-DSA-87 layer, or one that failed", async () => {
+      assert.equal((await txRun(bob, ["U", "L"], { pqLayer: { present: true, count: 1, verified: false, reason: "bad" } })).res.json.error, "not-hybrid");
+      assert.equal((await txRun(bob, ["D", "L"], { code: 11 })).res.json.error, "tx-failed");
+    });
+
+    it("keeps the session usable while the tx is not committed yet", async () => {
+      const { sessionNonce, challenge } = await startSession(bob);
+      const inputs: Input[] = [{ tick: 2, dir: "D" }]; // unique: other tests only turn on ticks divisible by 3
+      const h = hash();
+      const first = await api("POST", "/api/runs", { sessionNonce, address: bob.address, inputs, txHash: h });
+      assert.equal(first.status, 404);
+      assert.equal(first.json.error, "tx-not-found");
+      txs.set(h, mkTx(h, buildRunMemo(challenge.id, sessionNonce, replayHash(challenge, inputs)), bob));
+      const retry = await api("POST", "/api/runs", { sessionNonce, address: bob.address, inputs, txHash: h });
+      assert.equal(retry.status, 201);
+    });
   });
 });

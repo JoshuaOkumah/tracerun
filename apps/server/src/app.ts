@@ -6,6 +6,7 @@ import {
   RULES_V1,
   buildAnchorMemo,
   buildCommitment,
+  buildRunMemo,
   compareRuns,
   isDir,
   replay,
@@ -68,6 +69,7 @@ function summary(run: RunRecord) {
     finalStateHash: run.result.finalStateHash,
     submittedAt: new Date(run.submittedAt).toISOString(),
     verified: true,
+    proof: run.proof,
     anchor: run.anchor ? { ...run.anchor, anchoredAt: new Date(run.anchor.anchoredAt).toISOString() } : null,
   };
 }
@@ -131,10 +133,30 @@ export function createApp({ config, store, chain, now = Date.now }: Deps) {
     }),
   );
 
+  /** Reads a run's tx back and checks it, or fails with a precise reason. */
+  async function checkTx(txHash: string, memo: string, address: string) {
+    if (!TXHASH_RE.test(txHash)) fail(400, "bad-txhash", "txHash must be 64 hex characters");
+    const tx = await chain.inspectAnchor(txHash.toUpperCase());
+    if (!tx) fail(404, "tx-not-found", "the network does not know this transaction yet; retry in a few seconds");
+    if (tx!.code !== 0) fail(422, "tx-failed", "the transaction did not succeed", { code: tx!.code });
+    if (tx!.memo !== memo) fail(422, "memo-mismatch", "the transaction memo does not name this run");
+    if (tx!.signer?.address !== address) fail(422, "signer-mismatch", "the transaction was not signed by this run's player");
+    if (!tx!.pqLayer.present || tx!.pqLayer.verified !== true) {
+      fail(422, "not-hybrid", "the transaction has no verified ML-DSA-87 layer", { tier: tx!.tier, reason: tx!.pqLayer.reason });
+    }
+    return { txHash: tx!.txhash, height: tx!.height.toString() };
+  }
+
   /**
-   * Submit a signed run. The server trusts nothing the client says about the
-   * result: it rebuilds the commitment text from the raw fields, checks the
-   * QoreX signature over that text, and replays the inputs itself.
+   * Submit a run with its proof. The server trusts nothing the client says
+   * about the result: it replays the inputs itself and rebuilds the text the
+   * player must have signed from the raw fields.
+   *
+   * Proof, either:
+   * - `txHash`: a hybrid-signed QoreX transaction whose memo is the run memo
+   *   (circuit, session nonce, replay hash). Verifies AND anchors the run.
+   * - `signature`: a QoreX signArbitrary signature over the commitment text,
+   *   checked against the player's registered ML-DSA-87 key. Verifies only.
    */
   app.post(
     "/api/runs",
@@ -145,7 +167,10 @@ export function createApp({ config, store, chain, now = Date.now }: Deps) {
       const address = String(body.address ?? "");
       if (!NONCE_RE.test(nonce)) fail(400, "bad-session", "sessionNonce is missing or malformed");
       if (!ADDRESS_RE.test(address)) fail(400, "bad-address", "address must be a qor1… address");
-      if (!body.signature || typeof body.signature !== "object") fail(400, "bad-signature", "signature is missing");
+      const viaTx = typeof body.txHash === "string";
+      if (!viaTx && (!body.signature || typeof body.signature !== "object")) {
+        fail(400, "bad-proof", "send a txHash or a signature");
+      }
 
       const session = await store.getSession(nonce);
       if (!session) fail(404, "unknown-session", "no such session");
@@ -161,24 +186,36 @@ export function createApp({ config, store, chain, now = Date.now }: Deps) {
       if (!out.ok) fail(422, "replay-rejected", "the inputs do not replay", { reason: out.error, atIndex: out.atIndex });
       const result = (out as Extract<typeof out, { ok: true }>).result;
 
-      // Rebuild the message the player must have signed. Never use client-supplied text.
-      const commitment = buildCommitment({
-        chainId: config.chainId,
-        challengeId: challenge.id,
-        sessionNonce: nonce,
-        address,
-        ruleset: challenge.rules.version,
-        replaySha256: result.replayHash,
-      });
+      // Refuse a replay someone already owns before touching the chain.
+      const existing = (await store.listRuns(challenge.id)).find((r) => r.result.replayHash === result.replayHash);
+      if (existing) fail(409, "replay-already-claimed", "this exact replay was already submitted", { runId: existing.id });
 
-      try {
-        await chain.verifyCommitment({ signer: address, data: commitment, signature: body.signature });
-      } catch (e) {
-        const code = (e as { code?: string }).code;
-        if (code === "KEY_NOT_REGISTERED") {
-          fail(403, "pq-key-not-registered", "send one transaction from QoreX first to register your post-quantum key");
+      let commitment: string;
+      let anchor: RunRecord["anchor"];
+      if (viaTx) {
+        // Rebuild the memo the player's transaction must carry. Never use client-supplied text.
+        commitment = buildRunMemo(challenge.id, nonce, result.replayHash);
+        const tx = await checkTx(String(body.txHash), commitment, address);
+        anchor = { ...tx, anchoredAt: now() };
+      } else {
+        // Rebuild the message the player must have signed. Never use client-supplied text.
+        commitment = buildCommitment({
+          chainId: config.chainId,
+          challengeId: challenge.id,
+          sessionNonce: nonce,
+          address,
+          ruleset: challenge.rules.version,
+          replaySha256: result.replayHash,
+        });
+        try {
+          await chain.verifyCommitment({ signer: address, data: commitment, signature: body.signature });
+        } catch (e) {
+          const code = (e as { code?: string }).code;
+          if (code === "KEY_NOT_REGISTERED") {
+            fail(403, "pq-key-not-registered", "send one transaction from QoreX first to register your post-quantum key");
+          }
+          fail(401, "signature-invalid", "the signature does not match this run", { reason: code ?? "invalid" });
         }
-        fail(401, "signature-invalid", "the signature does not match this run", { reason: code ?? "invalid" });
       }
 
       const run: RunRecord = {
@@ -189,9 +226,11 @@ export function createApp({ config, store, chain, now = Date.now }: Deps) {
         sessionNonce: nonce,
         inputs,
         result,
+        proof: viaTx ? "tx" : "message",
         commitment,
-        signature: body.signature,
+        ...(viaTx ? {} : { signature: body.signature }),
         submittedAt: now(),
+        ...(anchor ? { anchor } : {}),
       };
       try {
         await store.insertRun(run);
@@ -222,20 +261,9 @@ export function createApp({ config, store, chain, now = Date.now }: Deps) {
         res.json({ run: summary(run!) });
         return;
       }
-      const txHash = String(req.body?.txHash ?? "");
-      if (!TXHASH_RE.test(txHash)) fail(400, "bad-txhash", "txHash must be 64 hex characters");
-
-      const tx = await chain.inspectAnchor(txHash.toUpperCase());
-      if (!tx) fail(404, "tx-not-found", "the network does not know this transaction yet; retry in a few seconds");
       const expectedMemo = buildAnchorMemo(run!.challengeId, run!.result.replayHash);
-      if (tx!.code !== 0) fail(422, "tx-failed", "the transaction did not succeed", { code: tx!.code });
-      if (tx!.memo !== expectedMemo) fail(422, "memo-mismatch", "the transaction memo does not name this run");
-      if (tx!.signer?.address !== run!.address) fail(422, "signer-mismatch", "the transaction was not signed by this run's player");
-      if (!tx!.pqLayer.present || tx!.pqLayer.verified !== true) {
-        fail(422, "not-hybrid", "the transaction has no verified ML-DSA-87 layer", { tier: tx!.tier, reason: tx!.pqLayer.reason });
-      }
-
-      const anchor = { txHash: tx!.txhash, height: tx!.height.toString(), anchoredAt: now() };
+      const tx = await checkTx(String(req.body?.txHash ?? ""), expectedMemo, run!.address);
+      const anchor = { ...tx, anchoredAt: now() };
       await store.setAnchor(run!.id, anchor);
       res.json({ run: summary({ ...run!, anchor }) });
     }),
@@ -250,8 +278,9 @@ export function createApp({ config, store, chain, now = Date.now }: Deps) {
       res.json({
         run: summary(run!),
         inputs: run!.inputs,
+        proof: run!.proof,
         commitment: run!.commitment,
-        signature: run!.signature,
+        signature: run!.signature ?? null,
         seed: challengeFor(DAY_RE.exec(run!.challengeId)![1], config.dailySecret).seed,
       });
     }),

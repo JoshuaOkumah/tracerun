@@ -203,3 +203,11 @@ test("anchor memo round-trips and fits the 256-byte memo limit", async () => {
   assert.throws(() => buildAnchorMemo("daily 2026", h));
   assert.throws(() => buildAnchorMemo("daily-2026-11-26", "XYZ"));
 });
+
+test("run memo binds circuit, session and replay, and fits 256 bytes", async () => {
+  const { buildRunMemo } = await import("../src/index.js");
+  const memo = buildRunMemo("daily-2026-11-26", "0".repeat(32), "ab".repeat(32));
+  assert.equal(memo, `TRACE//RUN v1 daily-2026-11-26 ${"0".repeat(32)} ${"ab".repeat(32)}`);
+  assert.ok(new TextEncoder().encode(memo).length <= 256);
+  assert.throws(() => buildRunMemo("daily-2026-11-26", "XYZ", "ab".repeat(32)));
+});
